@@ -1,5 +1,7 @@
 Param(
-    [string]$project = "",
+    [string]$project = "Inbox",
+    [string]$label = "work",
+    [int]$priority = 1,
     [string]$noteText = "test"
 )
 
@@ -7,16 +9,90 @@ process
 {
     $apiUrl = "https://todoist.com/API/v7/sync"
     $key = "e4008326dc27dd5ecc36770da50cebd902136ea1"
-    function New-TestNote
+
+    function Get-Labels
     {
         $postParams = @{token="$key";
-                        commands = '[{"type": "item_add", "temp_id": "43f7ed23-a038-46b5-b2c9-4abda9097ffa", "uuid": "997d4b43-55f1-48a9-9e66-de5785dfd69c", "args": {"content": "Task1"}}]'}
-        Invoke-WebRequest -Uri $apiUrl -Method POST -Body $postParams
+                        sync_token="*";
+                        resource_types = '["labels"]'
+                        }
+        $res = Hit-Api($postParams)
+        $js = ConvertFrom-Json $res.Content
+        return $js.labels
+    }
+
+    function Get-Projects
+    {
+        $postParams = @{token="$key";
+                        sync_token="*";
+                        resource_types = '["projects"]'
+                        }
+        $res = Hit-Api($postParams)
+        $js = ConvertFrom-Json $res.Content
+        return $js.Projects
+    }
+
+    function New-TestNote
+    {
+        $commandString = ConvertFrom-Json "[{}]"
+        
+        $commandString[0] | add-member -name "uuid" -value $([guid]::NewGuid()) -MemberType NoteProperty
+        $commandString[0] | add-member -name "temp_id" -value $([guid]::NewGuid()) -MemberType NoteProperty
+        
+        $commandString[0] | add-member -name "type" -value "item_add" -MemberType NoteProperty
+
+        $cmdArgs = @{ content = $noteText ; project_id = $projects[$project] ; labels = @($labels[$label]) ; priority = $priority}
+        $commandString[0] | add-member -name "args" -value $cmdArgs -MemberType NoteProperty
+        
+        
+        $commandStringFinal = ($commandString) | ConvertTo-Json -Depth 20 -Compress
+        
+        # make array TODO FIX THIS 
+        $final = "[" + $commandStringFinal + "]"
+        
+        $postParams = @{token="$key";
+                        commands = "$final"
+                        }
+        $res = Hit-Api($postParams)
+        return $res
+    }
+
+    function Hit-Api($params)
+    {
+        try
+        {
+            $res = Invoke-WebRequest -Uri $apiUrl -Method POST -Body $params
+        }
+        catch
+        {
+            $ErrorMessage = $_.Exception.Message
+            $FailedItem = $_.Exception.ItemName
+            $Stack = $_.Exception.StackTrace
+            Write-Host $ErrorMessage
+            Write-Host $FailedItem
+            Write-Host $Stack
+        }
+        return $res
+    }
+
+    function ConvertTo-Hash($jsArray)
+    {
+        $hash = @{}
+        foreach ($obj in $jsArray)
+        {
+            $hash[$obj.name] = $obj.id
+        }
+        return $hash
     }
 
     function Main
     {
-        New-TestNote
+        $labels = Get-Labels
+        $projects = Get-Projects
+        $projects = ConvertTo-Hash($projects)
+        $labels = ConvertTo-Hash($labels)
+        $newResult = New-TestNote
+        $newResult.StatusDescription
     }
     main
 
